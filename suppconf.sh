@@ -6,6 +6,12 @@ MESSAGES_FILE="messages.txt"
 BOOT_FILE="boot.txt"
 NTP_FILE="ntp.txt"
 
+# Color codes
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
 # Create directory if it doesn't exist
 mkdir -p "$RCA_ANALYSIS_DIR"
 
@@ -15,6 +21,16 @@ _get_epoch() {
     LC_ALL=C date -d "$date_str" +%s 2>/dev/null
 }
 
+# --- Function to show progress ---
+show_progress() {
+    local message="$1"
+    printf "%s" "$message"
+    for ((i=0; i<3; i++)); do
+        sleep 0.5
+        printf "."
+    done
+}
+
 # --- Function to filter /var/log/messages ---
 filter_messages() {
     local output_file="$RCA_ANALYSIS_DIR/log-messages.out"
@@ -22,18 +38,16 @@ filter_messages() {
     local end_time="$2"
 
     if [[ ! -f "$MESSAGES_FILE" ]]; then
-        echo "Error: $MESSAGES_FILE not found!"
+        echo -e "${RED}Error: $MESSAGES_FILE not found!${NC}"
         return 1
     fi
 
-    echo "Filtering /var/log/messages..."
+    show_progress "Filtering /var/log/messages..."
     if [[ -n "$start_time" && -n "$end_time" ]]; then
-        echo "Applying time filter: $start_time to $end_time"
         start_time_escaped="${start_time//\//\\/}"
         end_time_escaped="${end_time//\//\\/}"
         sed -n "/${start_time_escaped}/,/${end_time_escaped}/{/^#==/q;p}" "$MESSAGES_FILE" > "$output_file"
     elif [[ -n "$start_time" && -z "$end_time" ]]; then
-        echo "Applying time filter: from $start_time"
         start_time_escaped="${start_time//\//\\/}"
         sed -n "/${start_time_escaped}/,/#==/{/^#==/q;p}" "$MESSAGES_FILE" > "$output_file"
     else
@@ -41,11 +55,9 @@ filter_messages() {
     fi
 
     if [[ -s "$output_file" ]]; then
-        echo "Filtered messages saved to $output_file"
-    elif [[ -f "$output_file" ]]; then
-        echo "No messages found for the specified criteria in $MESSAGES_FILE. Output file $output_file is empty."
+        echo -e " ${GREEN}Done${NC}"
     else
-        echo "Failed to create $output_file."
+        echo -e " ${RED}Fail${NC}"
     fi
 }
 
@@ -56,19 +68,17 @@ _filter_single_boot_log() {
     local output_file="$3"
     local description="$4"
 
-    echo "Filtering $description from $boot_file..."
+    show_progress "Filtering $description from $boot_file..."
     search_pattern_escaped=$(echo "$search_pattern" | sed 's/\//\\\//g')
     sed -n "/# ${search_pattern_escaped}/,/#==/ p" "$boot_file" > "$output_file.tmp"
 
     if [[ -s "$output_file.tmp" ]]; then
         cp "$output_file.tmp" "$output_file"
         rm "$output_file.tmp"
-        echo "Filtered $description saved to $output_file"
-    elif [[ -f "$output_file.tmp" ]]; then
-        echo "No logs found for $description in $boot_file using pattern '${search_pattern}'. Output file $output_file is empty."
-        rm "$output_file.tmp"
+        echo -e " ${GREEN}Done${NC}"
     else
-        echo "Failed to create temporary file for $description. Check permissions or disk space."
+        echo -e " ${RED}Fail${NC}"
+        rm "$output_file.tmp"
     fi
 }
 
@@ -76,7 +86,7 @@ filter_boot_logs() {
     local filter_type="$1"
 
     if [[ ! -f "$BOOT_FILE" ]]; then
-        echo "Error: $BOOT_FILE not found!"
+        echo -e "${RED}Error: $BOOT_FILE not found!${NC}"
         return 1
     fi
 
@@ -94,7 +104,7 @@ filter_boot_logs() {
             run_dmesg=true
             ;;
         *)
-            echo "Error: Invalid filter type '$filter_type' for -boot."
+            echo -e "${RED}Error: Invalid filter type '$filter_type' for -boot.${NC}"
             echo "Valid types are: journal, log, dmesg, all."
             return 1
             ;;
@@ -117,25 +127,20 @@ filter_boot_logs() {
 show_server_time() {
     local output_file="$RCA_ANALYSIS_DIR/server_time_info.txt"
     if [[ ! -f "$NTP_FILE" ]]; then
-        echo "Error: $NTP_FILE not found!"
+        echo -e "${RED}Error: $NTP_FILE not found!${NC}"
         return 1
     fi
 
-    echo "Extracting server time and timezone information..."
     sed -n '/^# \/usr\/bin\/timedatectl/,/^#==/{p;}' "$NTP_FILE" | sed '$d' > "$output_file.tmp"
     if [[ -s "$output_file.tmp" ]]; then
         mv "$output_file.tmp" "$output_file"
-        echo "Server time and timezone information (from timedatectl output):"
-        cat "$output_file"
-        echo "Full output saved to $output_file"
+        sed -e "s/Time zone: \(.*\) (CEST, +0200)/Time zone: ${YELLOW}\1${NC} (CEST, +0200)/" "$output_file"
     else
         grep "timedatectl" "$NTP_FILE" -A8 > "$output_file"
         if [[ -s "$output_file" ]]; then
-             echo "Server time and timezone information (using grep -A8 timedatectl):"
-             cat "$output_file"
-             echo "Full output saved to $output_file"
+            sed -e "s/Time zone: \(.*\) (CEST, +0200)/Time zone: ${YELLOW}\1${NC} (CEST, +0200)/" "$output_file"
         else
-            echo "Could not find 'timedatectl' output in $NTP_FILE."
+            echo -e "${RED}Could not find 'timedatectl' output in $NTP_FILE.${NC}"
             rm "$output_file.tmp" 2>/dev/null
         fi
     fi
@@ -146,13 +151,11 @@ find_last_reboot() {
     local output_file="$RCA_ANALYSIS_DIR/last_reboot.out"
 
     if [[ ! -f "$BOOT_FILE" ]]; then
-        echo "Error: $BOOT_FILE not found!" > "$output_file"
-        echo "Error: $BOOT_FILE not found!"
+        echo -e "${RED}Error: $BOOT_FILE not found!${NC}" > "$output_file"
         return 1
     fi
 
-    echo "Scanning for last reboot information..."
-
+    show_progress "Scanning for last reboot information..."
     local max_epoch=0
     local max_line=""
     local max_source=""
@@ -242,9 +245,8 @@ find_last_reboot() {
         echo "(Epoch: $max_epoch, Date: $(LC_ALL=C date -d "@$max_epoch" +"%a %b %d %T %Y %Z"))"
     else
         echo "Could not reliably determine last reboot time from $BOOT_FILE." > "$output_file"
-        echo "No reboot information found or parsed successfully."
+        echo -e "${RED}No reboot information found or parsed successfully.${NC}"
     fi
-    echo "Full details saved to $output_file"
 }
 
 # --- Main script logic ---
@@ -306,7 +308,7 @@ while [[ $# -gt 0 ]]; do
             shift
             shift
         else
-            echo "Error: -from requires a value." >&2; exit 1
+            echo -e "${RED}Error: -from requires a value.${NC}" >&2; exit 1
         fi
         ;;
         -to)
@@ -315,7 +317,7 @@ while [[ $# -gt 0 ]]; do
             shift
             shift
         else
-            echo "Error: -to requires a value." >&2; exit 1
+            echo -e "${RED}Error: -to requires a value.${NC}" >&2; exit 1
         fi
         ;;
         -h|--help)
@@ -333,7 +335,7 @@ while [[ $# -gt 0 ]]; do
         exit 0
         ;;
         *)
-        echo "Unknown option: $1"
+        echo -e "${RED}Unknown option: $1${NC}"
         echo "Run '$0 --help' for usage."
         exit 1
         ;;
@@ -342,9 +344,9 @@ done
 
 if $RUN_ALL || $RUN_MESSAGES; then
     if [[ -n "$START_DATE_TIME" && -z "$END_DATE_TIME" && ($RUN_MESSAGES || $RUN_ALL) ]]; then
-        echo "Warning: -from specified without -to for messages. Filtering from $START_DATE_TIME onwards."
+        echo -e "${YELLOW}Warning: -from specified without -to for messages. Filtering from $START_DATE_TIME onwards.${NC}"
     elif [[ -z "$START_DATE_TIME" && -n "$END_DATE_TIME" && ($RUN_MESSAGES || $RUN_ALL) ]]; then
-        echo "Error: -to specified without -from for messages. Please specify both or neither."
+        echo -e "${RED}Error: -to specified without -from for messages. Please specify both or neither.${NC}"
         if ! $RUN_ALL ; then exit 1; fi
     fi
     filter_messages "$START_DATE_TIME" "$END_DATE_TIME"
@@ -368,4 +370,4 @@ if $RUN_ALL || $RUN_REBOOT; then
     find_last_reboot
 fi
 
-echo "Log analysis script finished. Outputs are in the '$RCA_ANALYSIS_DIR' directory."
+echo -e "\nFull details saved in ${YELLOW}./$RCA_ANALYSIS_DIR${NC}"
