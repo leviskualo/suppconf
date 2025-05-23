@@ -131,6 +131,7 @@ show_server_time() {
         return 1
     fi
 
+    echo "Server time and timezone information (from timedatectl output):"
     sed -n '/^# \/usr\/bin\/timedatectl/,/^#==/{p;}' "$NTP_FILE" | sed '$d' > "$output_file.tmp"
     if [[ -s "$output_file.tmp" ]]; then
         mv "$output_file.tmp" "$output_file"
