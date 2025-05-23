@@ -127,23 +127,20 @@ filter_boot_logs() {
 show_server_time() {
     local output_file="$RCA_ANALYSIS_DIR/server_time_info.txt"
     if [[ ! -f "$NTP_FILE" ]]; then
-        echo -e "${RED}Error: $NTP_FILE not found!${NC}"
+        echo "Error: $NTP_FILE not found!"
         return 1
     fi
 
     echo "Server time and timezone information (from timedatectl output):"
-    sed -n '/^# \/usr\/bin\/timedatectl/,/^#==/{p;}' "$NTP_FILE" | sed '$d' > "$output_file.tmp"
+    # Extract only the relevant lines from timedatectl output
+    sed -n '/^# \/usr\/bin\/timedatectl/,/^#==/{/Local time:/p; /Universal time:/p; /RTC time:/p; /Time zone:/p; /System clock synchronized:/p; /NTP service:/p; /RTC in local TZ:/p}' "$NTP_FILE" | sed 's/^# \/usr\/bin\/timedatectl//; s/^#==//' > "$output_file.tmp"
+
     if [[ -s "$output_file.tmp" ]]; then
         mv "$output_file.tmp" "$output_file"
-        sed -e "s/Time zone: \(.*\) (CEST, +0200)/Time zone: ${YELLOW}\1${NC} (CEST, +0200)/" "$output_file"
+        cat "$output_file"
     else
-        grep "timedatectl" "$NTP_FILE" -A8 > "$output_file"
-        if [[ -s "$output_file" ]]; then
-            sed -e "s/Time zone: \(.*\) (CEST, +0200)/Time zone: ${YELLOW}\1${NC} (CEST, +0200)/" "$output_file"
-        else
-            echo -e "${RED}Could not find 'timedatectl' output in $NTP_FILE.${NC}"
-            rm "$output_file.tmp" 2>/dev/null
-        fi
+        echo "Could not find 'timedatectl' output in $NTP_FILE."
+        rm "$output_file.tmp" 2>/dev/null
     fi
 }
 
