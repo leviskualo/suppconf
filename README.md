@@ -18,7 +18,7 @@
 To use the script, simply execute it with the desired options. If no options are provided, the script will run all available filters and analyses by default.
 
 ```bash
-./suppconf.sh [options]
+./suppconf [options]
 ```
 
 ### Command-line Options
