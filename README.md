@@ -1,6 +1,6 @@
 # suppconf - Supportconfig Log Filter and Analyzer
 
-`suppconf.sh` is a Bash script designed to streamline the analysis of supportconfig logs. It filters key information from various log files typically found in a supportconfig archive, making it easier to identify issues and perform root cause analysis (RCA).
+`suppconf` is a Bash script designed to streamline the analysis of supportconfig logs. It filters key information from various log files typically found in a supportconfig archive, making it easier to identify issues and perform root cause analysis (RCA).
 
 ## Features
 
