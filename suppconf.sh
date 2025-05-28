@@ -2,9 +2,48 @@
 
 # Configuration
 RCA_ANALYSIS_DIR="rca_analysis"
-MESSAGES_FILE="messages.txt"
-BOOT_FILE="boot.txt"
-NTP_FILE="ntp.txt"
+CONFIG_FILE="suppconf.conf"
+
+# Default log file names
+MESSAGES_FILE_DEFAULT="messages.txt"
+BOOT_FILE_DEFAULT="boot.txt"
+NTP_FILE_DEFAULT="ntp.txt"
+SYSTEMD_FILE_DEFAULT="systemd.txt"
+CRON_FILE_DEFAULT="cron.txt"
+
+MESSAGES_FILE="$MESSAGES_FILE_DEFAULT"
+BOOT_FILE="$BOOT_FILE_DEFAULT"
+NTP_FILE="$NTP_FILE_DEFAULT"
+SYSTEMD_FILE="$SYSTEMD_FILE_DEFAULT"
+CRON_FILE="$CRON_FILE_DEFAULT"
+
+# Load configuration from file
+if [[ -f "$CONFIG_FILE" ]]; then
+    echo "Loading configuration from $CONFIG_FILE"
+    while IFS='=' read -r key value; do
+        case "$key" in
+            MESSAGES_FILE|BOOT_FILE|NTP_FILE|SYSTEMD_FILE|CRON_FILE)
+                # Remove potential surrounding quotes from value if any
+                value="${value%"}"
+                value="${value#"}"
+                # Ensure value is not empty before overriding
+                if [[ -n "$value" ]]; then
+                    declare "$key=$value" # Use declare to set the variable
+                    echo "  $key set to: $(eval echo \$$key)" # Confirm value
+                else
+                    echo "  Warning: Empty value for $key in $CONFIG_FILE. Using default."
+                fi
+                ;;
+            ""|\#*) # Ignore empty lines and comments
+                ;;
+            *)
+                echo "  Warning: Unknown key '$key' in $CONFIG_FILE. Ignoring."
+                ;;
+        esac
+    done < "$CONFIG_FILE"
+else
+    echo "Warning: Configuration file '$CONFIG_FILE' not found. Using default file names."
+fi
 
 # Color codes
 GREEN='\033[0;32m'
@@ -120,6 +159,55 @@ filter_boot_logs() {
 
     if $run_dmesg; then
         _filter_single_boot_log "$BOOT_FILE" "/bin/dmesg -T" "$RCA_ANALYSIS_DIR/dmesg.out" "dmesg -T"
+    fi
+}
+
+# --- Function to filter systemd logs ---
+filter_systemd_logs() {
+    local output_file="$RCA_ANALYSIS_DIR/systemd_analysis.out"
+
+    if [[ ! -f "$SYSTEMD_FILE" ]]; then
+        echo -e "${RED}Error: $SYSTEMD_FILE (for systemd logs) not found!${NC}"
+        return 1
+    fi
+
+    show_progress "Filtering systemd logs from $SYSTEMD_FILE..."
+
+    # Define patterns to search for systemd related log entries.
+    # Starting with broader terms, can be refined later.
+    # We are looking for lines containing these keywords.
+    # Using grep -E for extended regular expressions.
+    grep -E -i 'daemon|service|unit|failed|starting|stopping|activated|deactivated' "$SYSTEMD_FILE" > "$output_file"
+
+    if [[ -s "$output_file" ]]; then
+        echo -e " ${GREEN}Done${NC}"
+    else
+        # If grep found nothing, the file might be empty or patterns didn't match.
+        # It's not necessarily a "Fail" in terms of script error, but indicates no matching logs.
+        echo -e " ${YELLOW}No relevant systemd logs found or $SYSTEMD_FILE is empty.${NC}"
+        # Keep the empty file to indicate an attempt was made.
+    fi
+}
+
+# --- Function to filter cron logs ---
+filter_cron_logs() {
+    local output_file="$RCA_ANALYSIS_DIR/cron_analysis.out"
+
+    if [[ ! -f "$CRON_FILE" ]]; then
+        echo -e "${RED}Error: $CRON_FILE (for cron logs) not found!${NC}"
+        return 1
+    fi
+
+    show_progress "Filtering cron logs from $CRON_FILE..."
+
+    # Define patterns to search for cron related log entries.
+    # Using grep -E for extended regular expressions and -i for case-insensitivity.
+    grep -E -i 'CROND|CMD|RUN|job|error|failed|executed' "$CRON_FILE" > "$output_file"
+
+    if [[ -s "$output_file" ]]; then
+        echo -e " ${GREEN}Done${NC}"
+    else
+        echo -e " ${YELLOW}No relevant cron logs found or $CRON_FILE is empty.${NC}"
     fi
 }
 
@@ -253,6 +341,8 @@ RUN_MESSAGES=false
 BOOT_FILTER_TYPE=""
 RUN_TIME_INFO=false
 RUN_REBOOT=false
+RUN_SYSTEMD=false
+RUN_CRON=false
 START_DATE_TIME=""
 END_DATE_TIME=""
 
@@ -300,6 +390,16 @@ while [[ $# -gt 0 ]]; do
         RUN_ALL=false
         shift
         ;;
+        -systemd)
+        RUN_SYSTEMD=true
+        RUN_ALL=false
+        shift
+        ;;
+        -cron)
+        RUN_CRON=true
+        RUN_ALL=false
+        shift
+        ;;
         -from)
         if [[ -n "$2" ]]; then
             START_DATE_TIME="$2"
@@ -326,10 +426,12 @@ while [[ $# -gt 0 ]]; do
         echo "                        [type] can be: journal (default), log, dmesg, all."
         echo "  -timeinfo             Show server time and timezone from ntp.txt"
         echo "  -reboot               Scan boot.txt for the most recent reboot time."
+        echo "  -systemd              Filter systemd logs from SYSTEMD_FILE (see suppconf.conf)"
+        echo "  -cron                 Filter cron logs from CRON_FILE (see suppconf.conf)"
         echo "  -from YYYY-MM-DDTHH:MM  Specify start date and time for messages filter"
         echo "  -to   YYYY-MM-DDTHH:MM  Specify end date and time for messages filter"
         echo "  -h, --help            Show this help message"
-        echo "If no options are specified, all filters (-messages, -boot all, -timeinfo, -reboot) will be run."
+        echo "If no options are specified, all filters (-messages, -boot all, -timeinfo, -reboot, -systemd, -cron) will be run."
         exit 0
         ;;
         *)
@@ -366,6 +468,14 @@ fi
 
 if $RUN_ALL || $RUN_REBOOT; then
     find_last_reboot
+fi
+
+if $RUN_ALL || $RUN_SYSTEMD; then
+    filter_systemd_logs
+fi
+
+if $RUN_ALL || $RUN_CRON; then
+    filter_cron_logs
 fi
 
 echo -e "\nFull details saved in ${YELLOW}./$RCA_ANALYSIS_DIR${NC}"
