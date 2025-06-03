@@ -1,6 +1,6 @@
-# suppconf - Supportconfig Log Filter and Analyzer
+# rca - Supportconfig Log Filter and Analyzer
 
-`suppconf` is a Bash script designed to streamline the analysis of supportconfig logs. It filters key information from various log files typically found in a supportconfig archive, making it easier to identify issues and perform root cause analysis (RCA).
+`rca` is a Bash script designed to streamline the analysis of supportconfig logs. It filters key information from various log files typically found in a supportconfig archive, making it easier to identify issues and perform root cause analysis (RCA).
 
 ## Features
 
@@ -18,7 +18,7 @@
 To use the script, simply execute it with the desired options. If no options are provided, the script will run all available filters and analyses by default.
 
 ```bash
-./suppconf [options]
+./rca [options]
 ```
 
 ### Command-line Options
@@ -37,27 +37,27 @@ To use the script, simply execute it with the desired options. If no options are
 
 1.  **Run all filters and analyses (default behavior):**
     ```bash
-    ./suppconf
+    ./rca
     ```
 
 2.  **Filter messages and all boot log types:**
     ```bash
-    ./suppconf -messages -boot all
+    ./rca -messages -boot all
     ```
 
 3.  **Filter messages within a specific timeframe:**
     ```bash
-    ./suppconf -messages -from 2023-10-26T10:00 -to 2023-10-26T12:00
+    ./rca -messages -from 2023-10-26T10:00 -to 2023-10-26T12:00
     ```
 
 4.  **Only display server time information:**
     ```bash
-    ./suppconf -timeinfo
+    ./rca -timeinfo
     ```
 
 5.  **Only extract dmesg output from boot logs:**
     ```bash
-    ./suppconf -boot dmesg
+    ./rca -boot dmesg
     ```
 
 ## Directory Structure
@@ -74,4 +74,4 @@ Example contents of `rca_analysis/`:
 
 ## Dependencies
 
-`suppconf` relies on standard Linux utilities commonly available on most systems, such as `sed`, `grep`, `date` etc. It does not have any special external dependencies that need to be installed separately. 
+`rca` relies on standard Linux utilities commonly available on most systems, such as `sed`, `grep`, `date` etc. It does not have any special external dependencies that need to be installed separately. 
