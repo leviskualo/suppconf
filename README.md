@@ -1,6 +1,6 @@
 # suppconf - Supportconfig Log Filter and Analyzer
 
-`suppconf` is a Bash script designed to streamline the analysis of supportconfig logs. It filters key information from various log files typically found in a supportconfig archive, making it easier to identify issues and perform root cause analysis (RCA).
+`suppconf.sh` is a Bash script designed to streamline the analysis of supportconfig logs. It filters key information from various log files typically found in a supportconfig archive, making it easier to identify issues and perform root cause analysis (RCA).
 
 ## Features
 
@@ -17,7 +17,7 @@
 
 ## Configuration File (`suppconf.conf`)
 
-`suppconf` uses a configuration file named `suppconf.conf` to define the names of the log files it processes. This file should be in the same directory as the script. If this file is not found, the script will use default filenames.
+`suppconf.sh` uses a configuration file named `suppconf.conf` to define the names of the log files it processes. This file should be in the same directory as the script. If this file is not found, the script will use default filenames.
 
 The format is simple key-value pairs:
 ```
@@ -44,7 +44,7 @@ Lines starting with `#` are ignored as comments, as are empty lines. Unknown key
 To use the script, simply execute it with the desired options. If no options are provided, the script will run all available filters and analyses by default.
 
 ```bash
-./suppconf [options]
+./suppconf.sh [options]
 ```
 
 ### Command-line Options
@@ -67,32 +67,32 @@ To use the script, simply execute it with the desired options. If no options are
 
 1.  **Run all filters and analyses (default behavior):**
     ```bash
-    ./suppconf
+    ./suppconf.sh
     ```
 
 2.  **Filter messages and all boot log types:**
     ```bash
-    ./suppconf -messages -boot all
+    ./suppconf.sh -messages -boot all
     ```
 
 3.  **Filter messages within a specific timeframe:**
     ```bash
-    ./suppconf -messages -from 2023-10-26T10:00 -to 2023-10-26T12:00
+    ./suppconf.sh -messages -from 2023-10-26T10:00 -to 2023-10-26T12:00
     ```
 
 4.  **Only display server time information:**
     ```bash
-    ./suppconf -timeinfo
+    ./suppconf.sh -timeinfo
     ```
 
 5.  **Only extract dmesg output from boot logs:**
     ```bash
-    ./suppconf -boot dmesg
+    ./suppconf.sh -boot dmesg
     ```
 
 6.  **Filter only systemd and cron logs:**
     ```bash
-    ./suppconf -systemd -cron
+    ./suppconf.sh -systemd -cron
     ```
 
 ## Directory Structure
@@ -111,5 +111,28 @@ Example contents of `rca_analysis/`:
 
 ## Dependencies
 
-`suppconf` relies on standard Linux utilities. It does not have any special external dependencies that need to be installed separately. 
+`suppconf.sh` relies on standard Linux utilities commonly available on most systems, such as `bash`, `sed`, `grep`, `date`, `mkdir`, `cat`, `rm`, `mv`, `cp`, `head`, `echo`, `printf`. It does not have any special external dependencies that need to be installed separately. The input log files (e.g., `messages.txt`, `boot.txt`, `ntp.txt`, `systemd.txt`, `cron.txt`), or the files specified in `suppconf.conf`, are expected to be in the same directory as the script or at the paths specified.
 
+## License
+
+This project is licensed under the MIT License.
+
+Copyright (c) 2025 leviskualo
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

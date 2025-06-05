@@ -60,6 +60,25 @@ _get_epoch() {
     LC_ALL=C date -d "$date_str" +%s 2>/dev/null
 }
 
+# --- Helper function to parse a valued command-line option ---
+# usage: value=$(_parse_valued_option "option_name" "value_candidate")
+#        if [[ \$? -ne 0 ]]; then exit 1; fi
+# On success: echoes the value_candidate and returns 0.
+# On failure: prints error to stderr, echoes nothing, and returns 1.
+_parse_valued_option() {
+    local option_name="$1"
+    local value_candidate="$2"
+
+    if [[ -n "$value_candidate" && ! "$value_candidate" =~ ^- ]]; then
+        echo "$value_candidate"
+        return 0
+    else
+        echo -e "${RED}Error: $option_name requires a value, or value is another option.${NC}" >&2
+        # Echo nothing on failure so caller assigning to variable gets empty string if not checking exit code first
+        return 1
+    fi
+}
+
 # --- Function to show progress ---
 show_progress() {
     local message="$1"
@@ -70,34 +89,112 @@ show_progress() {
     done
 }
 
+# --- Helper function to check file existence ---
+# usage: check_file_exists "filepath" "description for error message"
+# returns 0 if file exists, 1 otherwise
+check_file_exists() {
+    local filepath="$1"
+    local description="$2"
+    if [[ ! -f "$filepath" ]]; then
+        echo -e "${RED}Error: File '$filepath' ($description) not found!${NC}"
+        return 1
+    fi
+    return 0
+}
+
+# --- Helper function to execute a command and report status ---
+# usage: execute_and_report "progress_message" "command_to_execute" "output_file" "status_if_empty (FAIL|YELLOW)"
+# returns 0 on success (output file created), 1 on failure (command failed or output file not created)
+execute_and_report() {
+    local progress_message="$1"
+    local command_string="$2"
+    local output_file="$3"
+    local empty_output_status="$4" # "FAIL" or "YELLOW"
+
+    show_progress "$progress_message"
+
+    # Execute the command. Using eval for flexibility, but ensure command_string is well-formed.
+    # Consider security implications if command_string could come from untrusted sources (not an issue here).
+    if eval "$command_string"; then
+        if [[ -s "$output_file" ]]; then
+            echo -e " ${GREEN}Done${NC}"
+            return 0
+        else
+            if [[ "$empty_output_status" == "FAIL" ]]; then
+                echo -e " ${RED}Fail (Output file $output_file is empty or not created)${NC}"
+                return 1
+            elif [[ "$empty_output_status" == "YELLOW" ]]; then
+                echo -e " ${YELLOW}No relevant logs found or $output_file is empty.${NC}"
+                # For YELLOW, an empty output file is not a script failure, so return 0.
+                return 0
+            else
+                echo -e " ${RED}Error: Invalid empty_output_status '$empty_output_status' provided.${NC}"
+                return 1
+            fi
+        fi
+    else
+        echo -e " ${RED}Fail (Command execution failed for: $command_string)${NC}"
+        # Also remove potentially empty output file if command failed before creating it properly
+        rm -f "$output_file"
+        return 1
+    fi
+}
+
+# --- Helper function for generic grep-based filtering ---
+# usage: generic_grep_filter "input_file" "output_file" "grep_pattern" "progress_message_suffix" "empty_output_status" "input_file_description"
+# returns 0 on success, 1 on failure
+generic_grep_filter() {
+    local input_file="$1"
+    local output_file="$2"
+    local grep_pattern="$3"
+    local progress_message_suffix="$4" # e.g., "systemd logs"
+    local empty_output_status="$5"     # "YELLOW" or "FAIL"
+    local input_file_description="$6"  # e.g., "for systemd logs"
+
+    check_file_exists "$input_file" "$input_file_description" || return 1
+
+    local cmd="grep -E -i '$grep_pattern' '$input_file' > '$output_file'"
+
+    execute_and_report "Filtering $progress_message_suffix from $input_file..." "$cmd" "$output_file" "$empty_output_status"
+    return $? # Return the status of execute_and_report
+}
+
+# --- Helper function to get a new epoch if it's greater ---
+# usage: new_epoch_val=$(_get_newer_epoch "date_string_to_parse" current_max_epoch)
+_get_newer_epoch() {
+    local date_str_to_parse="$1"
+    local current_max_epoch="$2"
+    local new_epoch
+
+    new_epoch=$(_get_epoch "$date_str_to_parse")
+
+    if [[ -n "$new_epoch" && "$new_epoch" -gt "$current_max_epoch" ]]; then
+        echo "$new_epoch"
+    else
+        echo "$current_max_epoch"
+    fi
+}
+
 # --- Function to filter /var/log/messages ---
 filter_messages() {
     local output_file="$RCA_ANALYSIS_DIR/log-messages.out"
     local start_time="$1"
     local end_time="$2"
 
-    if [[ ! -f "$MESSAGES_FILE" ]]; then
-        echo -e "${RED}Error: $MESSAGES_FILE not found!${NC}"
-        return 1
-    fi
+    check_file_exists "$MESSAGES_FILE" "for /var/log/messages" || return 1
 
-    show_progress "Filtering /var/log/messages..."
+    local cmd
     if [[ -n "$start_time" && -n "$end_time" ]]; then
         start_time_escaped="${start_time//\//\\/}"
         end_time_escaped="${end_time//\//\\/}"
-        sed -n "/${start_time_escaped}/,/${end_time_escaped}/{/^#==/q;p}" "$MESSAGES_FILE" > "$output_file"
+        cmd="sed -n '/${start_time_escaped}/,/${end_time_escaped}/{/^#==/q;p}' '$MESSAGES_FILE' > '$output_file'"
     elif [[ -n "$start_time" && -z "$end_time" ]]; then
         start_time_escaped="${start_time//\//\\/}"
-        sed -n "/${start_time_escaped}/,/#==/{/^#==/q;p}" "$MESSAGES_FILE" > "$output_file"
+        cmd="sed -n '/${start_time_escaped}/,/#==/{/^#==/q;p}' '$MESSAGES_FILE' > '$output_file'"
     else
-        sed -n '/\/var\/log\/messages/,/#==/{/^#==/q;p}' "$MESSAGES_FILE" > "$output_file"
+        cmd="sed -n '/\/var\/log\/messages/,/#==/{/^#==/q;p}' '$MESSAGES_FILE' > '$output_file'"
     fi
-
-    if [[ -s "$output_file" ]]; then
-        echo -e " ${GREEN}Done${NC}"
-    else
-        echo -e " ${RED}Fail${NC}"
-    fi
+    execute_and_report "Filtering /var/log/messages..." "$cmd" "$output_file" "FAIL"
 }
 
 # --- Function to filter specific boot log sections ---
@@ -107,27 +204,21 @@ _filter_single_boot_log() {
     local output_file="$3"
     local description="$4"
 
-    show_progress "Filtering $description from $boot_file..."
     search_pattern_escaped=$(echo "$search_pattern" | sed 's/\//\\\//g')
-    sed -n "/# ${search_pattern_escaped}/,/#==/ p" "$boot_file" > "$output_file.tmp"
-
-    if [[ -s "$output_file.tmp" ]]; then
+    local cmd="sed -n '/# ${search_pattern_escaped}/,/#==/ p' '$boot_file' > '$output_file.tmp'"
+    if execute_and_report "Filtering $description from $boot_file..." "$cmd" "$output_file.tmp" "FAIL"; then
         cp "$output_file.tmp" "$output_file"
         rm "$output_file.tmp"
-        echo -e " ${GREEN}Done${NC}"
     else
-        echo -e " ${RED}Fail${NC}"
-        rm "$output_file.tmp"
+        rm -f "$output_file.tmp" # Cleanup if execute_and_report indicated failure
+        return 1 # Propagate failure
     fi
 }
 
 filter_boot_logs() {
     local filter_type="$1"
 
-    if [[ ! -f "$BOOT_FILE" ]]; then
-        echo -e "${RED}Error: $BOOT_FILE not found!${NC}"
-        return 1
-    fi
+    check_file_exists "$BOOT_FILE" "for boot logs" || return 1
 
     local run_journal=false
     local run_log=false
@@ -165,59 +256,23 @@ filter_boot_logs() {
 # --- Function to filter systemd logs ---
 filter_systemd_logs() {
     local output_file="$RCA_ANALYSIS_DIR/systemd_analysis.out"
-
-    if [[ ! -f "$SYSTEMD_FILE" ]]; then
-        echo -e "${RED}Error: $SYSTEMD_FILE (for systemd logs) not found!${NC}"
-        return 1
-    fi
-
-    show_progress "Filtering systemd logs from $SYSTEMD_FILE..."
-
-    # Define patterns to search for systemd related log entries.
-    # Starting with broader terms, can be refined later.
-    # We are looking for lines containing these keywords.
-    # Using grep -E for extended regular expressions.
-    grep -E -i 'daemon|service|unit|failed|starting|stopping|activated|deactivated' "$SYSTEMD_FILE" > "$output_file"
-
-    if [[ -s "$output_file" ]]; then
-        echo -e " ${GREEN}Done${NC}"
-    else
-        # If grep found nothing, the file might be empty or patterns didn't match.
-        # It's not necessarily a "Fail" in terms of script error, but indicates no matching logs.
-        echo -e " ${YELLOW}No relevant systemd logs found or $SYSTEMD_FILE is empty.${NC}"
-        # Keep the empty file to indicate an attempt was made.
-    fi
+    local pattern='daemon|service|unit|failed|starting|stopping|activated|deactivated'
+    generic_grep_filter "$SYSTEMD_FILE" "$output_file" "$pattern" "systemd logs" "YELLOW" "for systemd logs"
+    return $?
 }
 
 # --- Function to filter cron logs ---
 filter_cron_logs() {
     local output_file="$RCA_ANALYSIS_DIR/cron_analysis.out"
-
-    if [[ ! -f "$CRON_FILE" ]]; then
-        echo -e "${RED}Error: $CRON_FILE (for cron logs) not found!${NC}"
-        return 1
-    fi
-
-    show_progress "Filtering cron logs from $CRON_FILE..."
-
-    # Define patterns to search for cron related log entries.
-    # Using grep -E for extended regular expressions and -i for case-insensitivity.
-    grep -E -i 'CROND|CMD|RUN|job|error|failed|executed' "$CRON_FILE" > "$output_file"
-
-    if [[ -s "$output_file" ]]; then
-        echo -e " ${GREEN}Done${NC}"
-    else
-        echo -e " ${YELLOW}No relevant cron logs found or $CRON_FILE is empty.${NC}"
-    fi
+    local pattern='CROND|CMD|RUN|job|error|failed|executed'
+    generic_grep_filter "$CRON_FILE" "$output_file" "$pattern" "cron logs" "YELLOW" "for cron logs"
+    return $?
 }
 
 # --- Function to show server time and timezone ---
 show_server_time() {
     local output_file="$RCA_ANALYSIS_DIR/server_time_info.txt"
-    if [[ ! -f "$NTP_FILE" ]]; then
-        echo "Error: $NTP_FILE not found!"
-        return 1
-    fi
+    check_file_exists "$NTP_FILE" "for ntp/timedatectl data" || return 1
 
     echo "Server time and timezone information (from timedatectl output):"
     # Extract only the relevant lines from timedatectl output
@@ -236,8 +291,8 @@ show_server_time() {
 find_last_reboot() {
     local output_file="$RCA_ANALYSIS_DIR/last_reboot.out"
 
-    if [[ ! -f "$BOOT_FILE" ]]; then
-        echo -e "${RED}Error: $BOOT_FILE not found!${NC}" > "$output_file"
+    if ! check_file_exists "$BOOT_FILE" "for boot information (for last reboot)"; then
+        echo -e "${RED}Error: $BOOT_FILE not found!${NC}" > "$output_file" # Keep original behavior of writing to output_file
         return 1
     fi
 
@@ -245,6 +300,7 @@ find_last_reboot() {
     local max_epoch=0
     local max_line=""
     local max_source=""
+    local prev_max_epoch # To help check if max_epoch was updated by the helper
 
     local last_output_section
     last_output_section=$(sed -n '/^# \/usr\/bin\/last -wxF | egrep "reboot|shutdown|runlevel|system"/,/#==/p' "$BOOT_FILE")
@@ -255,10 +311,9 @@ find_last_reboot() {
                 local date_str_match
                 date_str_match=$(echo "$line" | grep -oE '[A-Za-z]{3}[[:space:]]+[A-Za-z]{3}[[:space:]]+[0-9]{1,2}[[:space:]]+[0-9]{2}:[0-9]{2}:[0-9]{2}[[:space:]]+[0-9]{4}')
                 if [[ -n "$date_str_match" ]]; then
-                    local current_epoch
-                    current_epoch=$(_get_epoch "$date_str_match")
-                    if [[ -n "$current_epoch" && "$current_epoch" -gt "$max_epoch" ]]; then
-                        max_epoch=$current_epoch
+                    prev_max_epoch=$max_epoch
+                    max_epoch=$(_get_newer_epoch "$date_str_match" "$max_epoch")
+                    if [[ "$max_epoch" != "$prev_max_epoch" ]]; then
                         max_line="$line"
                         max_source="last -wxF output"
                     fi
@@ -273,10 +328,9 @@ find_last_reboot() {
         local date_str_match
         date_str_match=$(echo "$who_b_content" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[0-9]{2}:[0-9]{2}(:[0-9]{2})?')
         if [[ -n "$date_str_match" ]]; then
-            local current_epoch
-            current_epoch=$(_get_epoch "$date_str_match")
-            if [[ -n "$current_epoch" && "$current_epoch" -gt "$max_epoch" ]]; then
-                max_epoch=$current_epoch
+            prev_max_epoch=$max_epoch
+            max_epoch=$(_get_newer_epoch "$date_str_match" "$max_epoch")
+            if [[ "$max_epoch" != "$prev_max_epoch" ]]; then
                 max_line="$who_b_content"
                 max_source="who -b output"
             fi
@@ -289,10 +343,9 @@ find_last_reboot() {
         local date_str_match="${BASH_REMATCH[1]}"
         date_str_match=$(echo "$date_str_match" | sed 's/^[ \t]*//;s/[ \t]*$//')
 
-        local current_epoch
-        current_epoch=$(_get_epoch "$date_str_match")
-        if [[ -n "$current_epoch" && "$current_epoch" -gt "$max_epoch" ]]; then
-            max_epoch=$current_epoch
+        prev_max_epoch=$max_epoch
+        max_epoch=$(_get_newer_epoch "$date_str_match" "$max_epoch")
+        if [[ "$max_epoch" != "$prev_max_epoch" ]]; then
             max_line="$dmesg_first_log_line"
             max_source="dmesg -T (first log line)"
         fi
@@ -311,10 +364,9 @@ find_last_reboot() {
         fi
 
         if [[ -n "$date_str_match" ]]; then
-            local current_epoch
-            current_epoch=$(_get_epoch "$date_str_match")
-            if [[ -n "$current_epoch" && "$current_epoch" -gt "$max_epoch" ]]; then
-                max_epoch=$current_epoch
+            prev_max_epoch=$max_epoch
+            max_epoch=$(_get_newer_epoch "$date_str_match" "$max_epoch")
+            if [[ "$max_epoch" != "$prev_max_epoch" ]]; then
                 max_line="$journal_first_log_line"
                 max_source="journalctl --boot 0 (first log line)"
             fi
@@ -401,22 +453,16 @@ while [[ $# -gt 0 ]]; do
         shift
         ;;
         -from)
-        if [[ -n "$2" ]]; then
-            START_DATE_TIME="$2"
-            shift
-            shift
-        else
-            echo -e "${RED}Error: -from requires a value.${NC}" >&2; exit 1
-        fi
+        START_DATE_TIME=$(_parse_valued_option "$key" "$2")
+        if [[ $? -ne 0 ]]; then exit 1; fi
+        shift # For -from
+        shift # For its value
         ;;
         -to)
-        if [[ -n "$2" ]]; then
-            END_DATE_TIME="$2"
-            shift
-            shift
-        else
-            echo -e "${RED}Error: -to requires a value.${NC}" >&2; exit 1
-        fi
+        END_DATE_TIME=$(_parse_valued_option "$key" "$2")
+        if [[ $? -ne 0 ]]; then exit 1; fi
+        shift # For -to
+        shift # For its value
         ;;
         -h|--help)
         echo "Usage: $0 [options]"
